@@ -1,0 +1,29 @@
+# 版本控制
+.git
+.gitignore
+
+# 依赖与构建产物
+**/node_modules
+**/venv
+**/.venv
+**/__pycache__
+**/*.pyc
+frontend/dist
+
+# 敏感与数据文件
+**/.env
+**/.env.local
+**/.enc_key
+**/mcp_servers.json
+**/*.db
+**/*.sqlite
+**/*.bak*
+
+# 日志
+**/*.log
+
+# IDE / OS
+.idea
+.vscode
+.DS_Store
+Thumbs.db

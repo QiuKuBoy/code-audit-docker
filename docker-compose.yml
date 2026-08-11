@@ -1,0 +1,43 @@
+# CodeAudit — Docker Compose 一键部署
+# 用法: cp .env.example .env && docker compose up -d
+services:
+  codeaudit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: codeaudit:latest
+    container_name: codeaudit
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # SQLite 持久化到 /data 卷
+      DATABASE_URL: "sqlite+aiosqlite:////data/code_audit.db"
+      # ── LLM API Keys（从宿主机 .env 读取，留空则稍后在网页设置页添加）──
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      BAIDU_API_KEY: "${BAIDU_API_KEY:-}"
+      DOUBAO_API_KEY: "${DOUBAO_API_KEY:-}"
+      MINIMAX_API_KEY: "${MINIMAX_API_KEY:-}"
+      ZHIPU_API_KEY: "${ZHIPU_API_KEY:-}"
+      QWEN_API_KEY: "${QWEN_API_KEY:-}"
+      KIMI_API_KEY: "${KIMI_API_KEY:-}"
+      SILICONFLOW_API_KEY: "${SILICONFLOW_API_KEY:-}"
+      # 默认 LLM 提供商
+      DEFAULT_LLM_PROVIDER: "${DEFAULT_LLM_PROVIDER:-deepseek}"
+      # 数据加密主密钥（建议设置固定值，否则每次重建容器密钥失效）
+      API_KEY_ENCRYPTION_KEY: "${API_KEY_ENCRYPTION_KEY:-}"
+    volumes:
+      # 数据库 / MCP 配置持久化
+      - codeaudit-data:/data
+      # 自定义技能包持久化（首次自动从镜像复制内置 14 包）
+      - codeaudit-skills:/app/skills
+    # 可选：扫描引擎（宿主机已装 semgrep 时注释掉以下行并取消 bind 挂载）
+    # volumes:
+    #   - /usr/local/bin/semgrep:/usr/local/bin/semgrep:ro
+
+volumes:
+  codeaudit-data:
+  codeaudit-skills:

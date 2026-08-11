@@ -1,0 +1,57 @@
+# ========== Python ==========
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# ========== Environment & Secrets ==========
+.env
+.env.local
+.env.*.local
+.enc_key
+mcp_servers.json
+
+# ========== Database ==========
+*.db
+*.sqlite
+*.sqlite3
+
+# ========== IDE ==========
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ========== Node ==========
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# ========== Backups ==========
+*.bak
+*.bak_*
+*.orig
+*.rej
+
+# ========== Logs ==========
+*.log
+logs/
+
+# ========== OS ==========
+Thumbs.db
+desktop.ini
+
+# ========== Agent Checkpoints ==========
+agent_checkpoints/

@@ -1,0 +1,62 @@
+# Custom rule examples for the code-audit agent (rule-as-code)
+# Format: id / name / type / severity / languages / patterns / exclude_patterns / message / cwe
+
+- id: CUSTOM-EVAL
+  name: Dangerous eval/exec usage
+  type: RCE
+  severity: HIGH
+  languages: [python, php, js]
+  patterns:
+    - "eval("
+    - "assert("
+    - "shell_exec("
+    - "os.system("
+  exclude_patterns:
+    - "eval_metrics"
+  message: "Direct eval/exec/system usage detected. Verify input is not user-controlled."
+  cwe: CWE-95
+
+- id: CUSTOM-PLAINTEXT-PASS
+  name: Plaintext or weak password storage
+  type: Crypto_Issue
+  severity: HIGH
+  languages: [python, php, java, js, go]
+  patterns:
+    - "md5($password"
+    - "sha1($password"
+    - "password = $"
+    - "store_password"
+  exclude_patterns: []
+  message: "Password stored with weak hash or in plaintext; use bcrypt/argon2."
+  cwe: CWE-916
+
+- id: CUSTOM-SQL-CONCAT
+  name: String-concatenated SQL query
+  type: SQL_Injection
+  severity: HIGH
+  languages: [php, python, java, js, go]
+  patterns:
+    - "SELECT * FROM"
+    - "SELECT "
+    - "WHERE id = "
+    - "query("
+  exclude_patterns:
+    - "prepare("
+    - "parametrize"
+    - "bindParam"
+  message: "SQL query built via string concatenation; confirm parameterization."
+  cwe: CWE-89
+
+- id: CUSTOM-ENV-LEAK
+  name: Environment / config exposure
+  type: Info_Disclosure
+  severity: MEDIUM
+  languages: [python, php, js, java, go]
+  patterns:
+    - "phpinfo("
+    - "print_r($_SERVER)"
+    - "dumpenv"
+    - "debug=True"
+  exclude_patterns: []
+  message: "Debug/env information may be exposed to clients."
+  cwe: CWE-200

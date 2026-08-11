@@ -1,0 +1,127 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Theme CSS Variables ──────────────────────────────────── */
+:root {
+  --color-bg: #0a0a0f;
+  --color-bg-card: #13131a;
+  --color-bg-hover: #1a1a24;
+  --color-border: #2a2a35;
+  --color-accent: #6366f1;
+  --color-accent-hover: #7c7ff5;
+  --color-text: #e4e4e7;
+  --color-text-muted: #71717a;
+  --color-text-dim: #52525b;
+}
+
+.light {
+  --color-bg: #f8f9fc;
+  --color-bg-card: #ffffff;
+  --color-bg-hover: #f1f3f9;
+  --color-border: #e2e4ea;
+  --color-accent: #4f5de4;
+  --color-accent-hover: #3d4bd6;
+  --color-text: #1a1d2e;
+  --color-text-muted: #6b7280;
+  --color-text-dim: #9ca3af;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--color-bg); }
+::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-text-dim); }
+
+/* ── Pipeline Visualizer ─────────────────────────────────── */
+.pipeline-container {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+}
+.pipeline-track { width: 100%; display: flex; align-items: center; }
+.pipeline-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.75rem;
+  border: 2px solid;
+  padding: 0.5rem 0.75rem;
+  min-width: 80px;
+  transition: all 0.3s ease;
+  position: relative;
+}
+.pipeline-node.done { border-color: rgba(34, 197, 94, 0.4); background: rgba(34, 197, 94, 0.05); }
+.pipeline-node.current { border-color: var(--color-accent); background: rgba(99, 102, 241, 0.1); transform: scale(1.05); }
+.pipeline-node.past { border-color: rgba(34, 197, 94, 0.2); background: rgba(34, 197, 94, 0.02); }
+.pipeline-node.pending { border-color: var(--color-border); background: rgba(26, 26, 36, 0.3); opacity: 0.5; }
+.pipeline-pulse {
+  position: absolute; top: -4px; right: -4px;
+  width: 12px; height: 12px;
+  background: var(--color-accent);
+  border-radius: 50%;
+  animation: ping 1s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+@keyframes ping {
+  75%, 100% { transform: scale(2); opacity: 0; }
+}
+.pipeline-check {
+  position: absolute; top: -6px; right: -6px;
+  width: 16px; height: 16px;
+  background: #22c55e; color: white;
+  border-radius: 50%;
+  font-size: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: bold;
+}
+
+/* ── Agent Orchestration ─────────────────────────────────── */
+.orch-container {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+}
+.orch-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid;
+  border-radius: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  min-width: 70px;
+  background: var(--color-bg);
+}
+.orch-arrow { font-size: 0.875rem; font-weight: 700; margin: 0 0.25rem; }
+
+/* ── Status Bar ──────────────────────────────────────────── */
+.status-bar {
+  position: fixed;
+  bottom: 0; left: 16rem; right: 0;
+  background: var(--color-bg-card);
+  backdrop-filter: blur(8px);
+  border-top: 1px solid var(--color-border);
+  border-left: 1px solid var(--color-border);
+  padding: 0.5rem 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 40;
+}
+
+/* ── Print ───────────────────────────────────────────────── */
+@media print {
+  body { background: white !important; color: black !important; }
+  .status-bar, nav, button, .pipeline-container, .orch-container { display: none !important; }
+  .report-preview { box-shadow: none !important; border: none !important; }
+}
