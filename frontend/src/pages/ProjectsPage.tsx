@@ -1,7 +1,7 @@
 
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Folder, Plus, Trash2, ChevronRight, Cpu, Layers, Clock, CheckCircle2, RotateCcw, Archive } from 'lucide-react'
+import { Folder, Plus, Trash2, ChevronRight, Cpu, Layers, Clock, CheckCircle2, RotateCcw, Archive, Upload, GitBranch, HardDrive } from 'lucide-react'
 import { api } from '../services/api'
 import type { Project, Audit, LLMProviderInfo, BatchAuditResult } from '../types'
 import { useI18n } from '../i18n'
@@ -14,6 +14,7 @@ const PROVIDER_LABELS: Record<string, string> = {
 }
 
 type ProjectStatus = 'all' | 'completed' | 'in_progress' | 'archived'
+type SourceTab = 'local' | 'upload' | 'git'
 
 function deriveStatus(audits: Audit[]): ProjectStatus {
   if (audits.length === 0) return 'archived'
@@ -29,6 +30,13 @@ export default function ProjectsPage({ newMode }: { newMode?: boolean }) {
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(!!newMode)
   const [form, setForm] = useState({ name: '', path: '', description: '', language: 'auto' })
+  const [sourceTab, setSourceTab] = useState<SourceTab>('upload')
+  const [zipFile, setZipFile] = useState<File | null>(null)
+  const [gitUrl, setGitUrl] = useState('')
+  const [autoStart, setAutoStart] = useState(true)
+  const [auditMode, setAuditMode] = useState('smart')
+  const [auditProvider, setAuditProvider] = useState('deepseek')
+  const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [filterTab, setFilterTab] = useState<ProjectStatus>('all')
   const navigate = useNavigate()
@@ -59,8 +67,34 @@ export default function ProjectsPage({ newMode }: { newMode?: boolean }) {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault(); setError('')
-    try { const project = await api.createProject({ ...form, language: form.language || 'auto' }); navigate(`/projects/${project.id}`) }
+    try {
+      let project: Project
+      const lang = form.language === 'auto' ? '' : form.language
+      if (sourceTab === 'local') {
+        project = await api.createProject({ ...form, language: form.language || 'auto' })
+      } else if (sourceTab === 'upload') {
+        if (!zipFile) { setError(t('projects.zipSelect')); return }
+        setBusy(t('projects.uploading'))
+        project = await api.uploadProject(zipFile, { name: form.name, description: form.description, language: lang })
+      } else {
+        if (!gitUrl.trim()) { setError(t('projects.gitUrl')); return }
+        setBusy(t('projects.cloning'))
+        project = await api.cloneProject({ url: gitUrl.trim(), name: form.name, description: form.description, language: lang })
+      }
+      setBusy('')
+      // Upload / Git flows can start an audit right away
+      if (autoStart && sourceTab !== 'local') {
+        const isConfigured = providers.find(p => p.provider === auditProvider)?.configured
+        if (!isConfigured) { alert(t('detail.noKeyGoSettings')); navigate(`/projects/${project.id}`); return }
+        setBusy(t('projects.startingAudit'))
+        const res = await api.createAudit({ project_id: project.id, mode: auditMode, llm_provider: auditProvider })
+        navigate(`/audits/${res.audit_id}`)
+        return
+      }
+      navigate(`/projects/${project.id}`)
+    }
     catch (e: any) { setError(e.message) }
+    finally { setBusy('') }
   }
 
   const remove = async (id: string, e: React.MouseEvent) => {
@@ -161,17 +195,62 @@ export default function ProjectsPage({ newMode }: { newMode?: boolean }) {
       {/* Create form */}
       {showForm && (
         <form onSubmit={submit} className="bg-bg-card border border-border rounded-xl p-6 mb-6 space-y-4">
+          {/* Source tabs */}
+          <div className="flex gap-0 border-b border-border -mx-6 px-6">
+            {([
+              { key: 'upload' as SourceTab, icon: <Upload className="w-4 h-4" />, label: t('projects.sourceUpload') },
+              { key: 'git' as SourceTab, icon: <GitBranch className="w-4 h-4" />, label: t('projects.sourceGit') },
+              { key: 'local' as SourceTab, icon: <HardDrive className="w-4 h-4" />, label: t('projects.sourceLocal') },
+            ]).map(tb => (
+              <button key={tb.key} type="button" onClick={() => setSourceTab(tb.key)}
+                className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                  sourceTab === tb.key ? 'border-accent text-text' : 'border-transparent text-text-muted hover:text-text'
+                }`}>
+                {tb.icon} {tb.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Source input per tab */}
+          {sourceTab === 'upload' && (
+            <div>
+              <label className="block text-sm font-medium mb-1.5">{t('projects.zipFile')}</label>
+              <label className="flex items-center justify-center gap-2 w-full px-3 py-6 border-2 border-dashed border-border rounded-lg text-sm cursor-pointer hover:border-accent transition-colors">
+                <Upload className="w-4 h-4 text-text-muted" />
+                <span className="text-text-muted">{zipFile ? zipFile.name : t('projects.zipSelect')}</span>
+                <input type="file" accept=".zip" className="hidden"
+                  onChange={e => setZipFile(e.target.files?.[0] || null)} />
+              </label>
+              <p className="text-[11px] text-text-dim mt-1.5">{t('projects.zipHint')}</p>
+            </div>
+          )}
+          {sourceTab === 'git' && (
+            <div>
+              <label className="block text-sm font-medium mb-1.5">{t('projects.gitUrl')}</label>
+              <input value={gitUrl} onChange={e => setGitUrl(e.target.value)}
+                placeholder={t('projects.gitUrlPlaceholder')}
+                className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm font-mono focus:outline-none focus:border-accent" />
+              <p className="text-[11px] text-text-dim mt-1.5">{t('projects.gitHint')}</p>
+            </div>
+          )}
+          {sourceTab === 'local' && (
+            <div>
+              <label className="block text-sm font-medium mb-1.5">{t('projects.path')}</label>
+              <input value={form.path} onChange={e => setForm({ ...form, path: e.target.value })}
+                placeholder={t('projects.pathPlaceholder')}
+                className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm font-mono focus:outline-none focus:border-accent" required />
+              <p className="text-[11px] text-text-dim mt-1.5">{t('projects.pathHint')}</p>
+            </div>
+          )}
+
           <div>
-            <label className="block text-sm font-medium mb-1.5">{t('projects.name')}</label>
+            <label className="block text-sm font-medium mb-1.5">
+              {sourceTab === 'local' ? t('projects.name') : t('projects.nameOptional')}
+            </label>
             <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
               placeholder="My Web App"
-              className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm focus:outline-none focus:border-accent" required />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1.5">{t('projects.path')}</label>
-            <input value={form.path} onChange={e => setForm({ ...form, path: e.target.value })}
-              placeholder={t('projects.pathPlaceholder')}
-              className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm font-mono focus:outline-none focus:border-accent" required />
+              className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm focus:outline-none focus:border-accent"
+              required={sourceTab === 'local'} />
           </div>
           <div>
             <label className="block text-sm font-medium mb-1.5">{t('projects.desc')}</label>
@@ -203,10 +282,44 @@ export default function ProjectsPage({ newMode }: { newMode?: boolean }) {
               <span className="text-[11px] text-text-dim">{t('projects.languageHint')}</span>
             </div>
           </div>
+
+          {/* Audit options (upload / git only) */}
+          {sourceTab !== 'local' && (
+            <div className="border border-border rounded-lg p-4 space-y-3">
+              <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+                <input type="checkbox" checked={autoStart} onChange={e => setAutoStart(e.target.checked)}
+                  className="w-4 h-4 accent-accent" />
+                {t('projects.autoStart')}
+              </label>
+              {autoStart && (
+                <div className="flex items-center gap-3 flex-wrap">
+                  <select value={auditMode} onChange={e => setAuditMode(e.target.value)}
+                    className="px-3 py-2 bg-bg border border-border rounded-lg text-sm focus:outline-none focus:border-accent">
+                    <option value="quick">{t('detail.mode.quick')}</option>
+                    <option value="smart">{t('detail.mode.smart')}</option>
+                    <option value="comprehensive">{t('detail.mode.comprehensive')}</option>
+                  </select>
+                  <select value={auditProvider} onChange={e => setAuditProvider(e.target.value)}
+                    className="px-3 py-2 bg-bg border border-border rounded-lg text-sm focus:outline-none focus:border-accent">
+                    {providers.map(p => (
+                      <option key={p.provider} value={p.provider}>
+                        {PROVIDER_LABELS[p.provider] || p.provider} {p.configured ? `(${t('detail.configured')})` : `(${t('detail.notConfigured')})`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
+
           {error && <p className="text-severity-high text-sm">{error}</p>}
-          <div className="flex gap-2">
-            <button type="submit" className="px-4 py-2 bg-accent hover:bg-accent-hover rounded-lg text-sm font-medium transition-colors">{t('projects.create')}</button>
-            <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 border border-border rounded-lg text-sm hover:bg-bg-hover transition-colors">{t('projects.cancel')}</button>
+          <div className="flex items-center gap-2">
+            <button type="submit" disabled={!!busy}
+              className="px-4 py-2 bg-accent hover:bg-accent-hover disabled:opacity-50 rounded-lg text-sm font-medium transition-colors">
+              {busy || t('projects.create')}
+            </button>
+            <button type="button" onClick={() => setShowForm(false)} disabled={!!busy}
+              className="px-4 py-2 border border-border rounded-lg text-sm hover:bg-bg-hover transition-colors">{t('projects.cancel')}</button>
           </div>
         </form>
       )}

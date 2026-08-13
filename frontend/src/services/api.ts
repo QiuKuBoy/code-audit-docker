@@ -31,6 +31,24 @@ export const api = {
   getProject: (id: string) => request<Project>(`/projects/${id}`),
   createProject: (data: { name: string; path: string; description?: string; language?: string }) =>
     request<Project>('/projects', { method: 'POST', body: JSON.stringify(data) }),
+  uploadProject: (file: File, meta: { name?: string; description?: string; language?: string }) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('name', meta.name || '')
+    fd.append('description', meta.description || '')
+    fd.append('language', meta.language || '')
+    // Bypass request() — FormData needs multipart, not application/json
+    return fetch('/api/projects/upload', { method: 'POST', body: fd })
+      .then(async res => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }))
+          throw new Error(body.detail || `HTTP ${res.status}`)
+        }
+        return res.json() as Promise<Project>
+      })
+  },
+  cloneProject: (data: { url: string; name?: string; description?: string; language?: string }) =>
+    request<Project>('/projects/clone', { method: 'POST', body: JSON.stringify(data) }),
   deleteProject: (id: string) => request<{ status: string }>(`/projects/${id}`, { method: 'DELETE' }),
   getProjectAudits: (id: string) => request<Audit[]>(`/projects/${id}/audits`),
 

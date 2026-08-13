@@ -11,8 +11,11 @@ Changes vs original:
 
 import json
 import asyncio
+import logging
 from typing import Optional
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 from app.core.config import settings
 from app.core.database import async_session
@@ -369,7 +372,7 @@ class ReActLoop:
                 db.add(log)
                 await db.commit()
         except Exception:
-            pass  # Don't let logging fail the audit
+            logger.warning("audit log write failed (audit=%s turn=%s)", log_audit_id, turn, exc_info=True)
 
     async def _save_finding(self, finding: FindingRecord):
         """Save finding to database. Uses parent audit_id for specialist agents."""
@@ -399,8 +402,8 @@ class ReActLoop:
                 )
                 db.add(db_finding)
                 await db.commit()
-        except Exception as e:
-            pass  # Don't let DB fail the audit
+        except Exception:
+            logger.warning("finding save failed (audit=%s)", self.state.audit_id, exc_info=True)
 
     async def _save_finding_safe(self, findings: list):
         """Batch-save findings (used by the orchestrator after merging)."""
@@ -430,7 +433,7 @@ class ReActLoop:
                     db.add(db_finding)
                 await db.commit()
         except Exception:
-            pass
+            logger.warning("batch finding save failed (audit=%s, n=%d)", self.state.audit_id, len(findings), exc_info=True)
 
     async def _update_audit_status(self):
         """Update audit record in database. Uses parent audit_id for specialist agents."""
@@ -454,4 +457,4 @@ class ReActLoop:
                         audit.completed_at = datetime.now(timezone.utc)
                     await db.commit()
         except Exception:
-            pass
+            logger.warning("audit status update failed (audit=%s)", log_audit_id, exc_info=True)

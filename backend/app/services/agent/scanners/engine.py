@@ -115,7 +115,7 @@ def run_semgrep(project_root: str, config: Optional[str] = None) -> dict:
 
 def _sca_pip_audit(project_root: str) -> List[ScanCandidate]:
     req = os.path.join(project_root, "requirements.txt")
-    if not os.path.isfile(req):
+    if not os.path.isfile(req) or not shutil.which("pip-audit"):
         return []
     try:
         proc = _run_cli(["pip-audit", "-r", req, "--format", "json"], timeout=settings.SCA_TIMEOUT)
@@ -141,10 +141,11 @@ def _sca_pip_audit(project_root: str) -> List[ScanCandidate]:
 
 def _sca_npm_audit(project_root: str) -> List[ScanCandidate]:
     pkg = os.path.join(project_root, "package-lock.json")
-    if not os.path.isfile(pkg):
+    if not os.path.isfile(pkg) or not shutil.which("npm"):
         return []
     try:
-        proc = _run_cli(["npm", "audit", "--json"], timeout=settings.SCA_TIMEOUT, cwd=project_root)
+        # shutil.which already resolves npm.cmd on Windows
+        proc = _run_cli([shutil.which("npm"), "audit", "--json"], timeout=settings.SCA_TIMEOUT, cwd=project_root)
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return []
     try:

@@ -97,15 +97,25 @@ recon → scan → triage → finding → verification → finalize
 | read_file | 读文件，大小分流：>250 行只读头部 400 行（excerpt）；跳过生成文件（min.js/lock/vendor） |
 | read_file_range | 指定行范围深读 |
 | list_files | 列文件，限 200 条，跳过常规忽略目录 |
-| grep | 优先 rg 输出 JSON，回退 Python 正则；单字段长度限制防 JSON 截断 |
+| grep | 优先 rg 输出 JSON，回退 Python 正则；单字段长度限制防 JSON 截断（**经 `asyncio.to_thread` 执行，不阻塞事件循环**） |
 | get_project_structure | 项目结构树 |
 | finalize_finding | 校验 7 必填字段 + 类型/严重级枚举 |
 | finish_audit | 覆盖度守卫 + 扫描守卫 |
-| run_engine_scan | 手动触发引擎扫描 |
+| run_engine_scan | 手动触发引擎扫描（Semgrep/SCA 经 `asyncio.to_thread`） |
 | run_custom_rules | 执行自定义 YAML 规则 |
+| verify_poc | PoC 静态校验（可选沙箱执行） |
 | load_skill | 按需加载技能全文 |
 
 安全：`_safe_path` 用 realpath + 前缀边界判断（`C:\proj` 不再匹配 `C:\projects\evil`）。
+
+### 2.4b 代码导入层（services/ingest.py）
+
+| 函数 | 说明 |
+|------|------|
+| ingest_zip(raw_bytes, filename) | 解压 zip 到 `UPLOADS_DIR`，含 zip-slip 路径穿越防护（`..`/绝对路径拒绝）、单层根目录自动扁平化、200MB 上限、技术栈自动探测 |
+| ingest_git(url, branch?) | `git clone --depth 1` 浅克隆到 `UPLOADS_DIR`（URL 校验 + 超时保护） |
+
+> 导入层让审计目标代码进入容器内目录，**彻底解耦宿主机路径**——这是 macOS / 任意平台可用的关键（容器不再需要访问宿主 `C:\` / `/Users`）。
 
 ### 2.5 引擎层（scanners/engine.py）
 
@@ -180,6 +190,8 @@ start_audit() →
 | /api/projects | POST/GET | 创建/列出项目 |
 | /api/projects/{id} | GET/DELETE | 详情/删除 |
 | /api/projects/{id}/audits | GET | 项目下审计列表 |
+| /api/projects/upload | POST | 上传 zip 解压导入（返回 project） |
+| /api/projects/clone | POST | Git 仓库浅克隆导入（返回 project） |
 | /api/audits | POST/GET | 创建审计/列表 |
 | /api/audits/batch | POST | 批量审计 |
 | /api/audits/{id} | GET | 审计详情（含 stage/stages_completed/scan_candidates_count） |
@@ -250,7 +262,10 @@ finalize_finding 被 LLM 调用 → 格式校验（7 必填+枚举）→ 通过�
 | TOOL_RESULT_BUDGET | 8000 | 单工具结果预算字符 |
 | SANDBOX_ENABLED | False | PoC 沙箱执行开关 |
 | MIN_FILES_PER_AGENT | 15 | 多 Agent 每代理最少文件数 |
-| DATABASE_URL | sqlite+aiosqlite:///./code_audit.db | 数据库 |
+| DATABASE_URL | sqlite+aiosqlite:///./code_audit.db | 数据库（Docker 下被 docker-compose 覆盖为 `sqlite+aiosqlite:////data/code_audit.db`，落在命名卷 `codeaudit-data`） |
+| UPLOADS_DIR | ./uploads | 上传/克隆代码目录（Docker 下为 `/data/uploads`，落在 `codeaudit-data` 卷） |
+| GIT_CLONE_TIMEOUT | 300 | git clone 超时（秒） |
+| MAX_UPLOAD_MB | 200 | 上传 zip 大小上限 |
 
 ## 5. 已修复的关键 Bug 记录
 
@@ -264,6 +279,20 @@ finalize_finding 被 LLM 调用 → 格式校验（7 必填+枚举）→ 通过�
 8. **API Key 明文存储**：SQLite 明文 + API 明文回显 → Fernet 加密 + 掩码返回
 9. **loop 死代码**：`_collect_scan_candidates` 含嵌套事件循环调用 → 已删除
 10. **service.py 死代码**：`audit.completed_at = audit.completed_at` → 保留（无副作用，已注释说明）
+
+### 5.1 安全与跨平台加固（本轮）
+
+11. **`cryptography` 依赖缺失 → API Key 明文落库**：补依赖；加密失败改为显式报错并记日志，不再静默存明文
+12. **加密主密钥写在镜像内**：容器重建后旧密文无法解密（全部 401）→ 主密钥文件改存数据卷 `/data/.enc_key` + 权限 600
+13. **技能包删除路径穿越**：`delete_skill` 未校验名称，`../../data` 可删任意目录 → 名称正则 + realpath 边界校验
+14. **技能包 zip 上传任意写文件**：写入前 realpath 边界校验，拒绝越界
+15. **审计时同步阻塞事件循环**：grep / Semgrep / PoC 在事件循环内同步执行导致 API 卡死 → 全部改 `asyncio.to_thread`
+16. **`create_task` 无引用被 GC + key 缺失留僵尸审计**：任务持强引用；先解析 key 再启动，缺失即落 `failed`
+17. **并行分支存入未验证 findings**：改为入库 `verified` 结果，未对抗验证的不进报告
+18. **resume 不解析 DB 内 key**：恢复审计必然失败 → resume 走统一 key 解析与解密
+19. **PoC 沙箱逃逸**：黑名单补 `__import__` / `getattr` / dunder 属性；static 模式明确返回未验证（不再谎称已验证）
+20. **SQLite `database is locked`**：WAL 模式 + `busy_timeout=30s`，避免并行子代理写库导致 finding 静默丢失
+21. **Mac 无法新建项目**：原仅支持「本地路径」，容器内访问不到宿主机路径 → 新增上传压缩包 / Git 在线仓库两种来源（解耦宿主机路径）
 
 ## 6. 已知限制
 

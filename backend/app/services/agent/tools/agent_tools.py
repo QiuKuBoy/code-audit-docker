@@ -11,6 +11,7 @@ Upgraded:
 import os
 import re
 import json
+import asyncio
 from typing import Callable, Optional
 
 from app.core.config import settings
@@ -153,10 +154,11 @@ class CodeAuditTools:
         try:
             full_path = self._safe_path(path)
             try:
-                result = subprocess_run(
+                result = await asyncio.to_thread(
+                    subprocess_run,
                     ["rg", pattern, full_path, "--json", "-C", str(context),
                      "--max-filesize", "1M", "--glob", "!node_modules", "--glob", "!.git"],
-                    timeout=30, cwd=self.project_root,
+                    30, self.project_root,
                 )
                 if result.returncode == 0 and result.stdout:
                     matches = []
@@ -252,7 +254,7 @@ class CodeAuditTools:
     # ── engine scan tools (AutoCVE Scan/Triage) ──────────────────────────
     async def run_semgrep_scan(self) -> str:
         """Run Semgrep SAST scan over the project. Returns candidate findings for triage."""
-        result = scan_engine.run_semgrep(self.project_root)
+        result = await asyncio.to_thread(scan_engine.run_semgrep, self.project_root)
         return json.dumps({
             "skipped": result["skipped"],
             "reason": result.get("reason", ""),
@@ -262,7 +264,7 @@ class CodeAuditTools:
 
     async def run_sca_scan(self) -> str:
         """Run dependency (SCA) scan: pip-audit / npm audit. Returns known-vuln deps."""
-        result = scan_engine.run_sca(self.project_root)
+        result = await asyncio.to_thread(scan_engine.run_sca, self.project_root)
         return json.dumps({
             "skipped": result["skipped"],
             "reason": result.get("reason", ""),
@@ -274,19 +276,24 @@ class CodeAuditTools:
         """Run custom YAML rules (rule-as-code) over the project."""
         if self._rules is None:
             self._rules = rules_loader.discover_rules()
-        hits = []
-        for root, dirs, files in os.walk(self.project_root):
-            dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
-            for fname in files:
-                rel = os.path.relpath(os.path.join(root, fname), self.project_root).replace("\\", "/")
-                if self._is_skippable(rel):
-                    continue
-                try:
-                    with open(os.path.join(root, fname), "r", encoding="utf-8", errors="replace") as f:
-                        content = f.read()
-                except Exception:
-                    continue
-                hits.extend(rules_loader.apply_custom_rules(content, rel, self._rules))
+
+        def _scan_all():
+            hits = []
+            for root, dirs, files in os.walk(self.project_root):
+                dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+                for fname in files:
+                    rel = os.path.relpath(os.path.join(root, fname), self.project_root).replace("\\", "/")
+                    if self._is_skippable(rel):
+                        continue
+                    try:
+                        with open(os.path.join(root, fname), "r", encoding="utf-8", errors="replace") as f:
+                            content = f.read()
+                    except Exception:
+                        continue
+                    hits.extend(rules_loader.apply_custom_rules(content, rel, self._rules))
+            return hits
+
+        hits = await asyncio.to_thread(_scan_all)
         return json.dumps({"rules_loaded": len(self._rules), "hits": hits[:settings.MAX_SCAN_CANDIDATES]}, ensure_ascii=False)
 
     # ── skill / verification tools ───────────────────────────────────────
@@ -301,7 +308,7 @@ class CodeAuditTools:
 
     async def verify_poc(self, poc: str, description: str = "") -> str:
         """Static-validate (or sandbox-execute if enabled) a PoC for a finding."""
-        result = poc_sandbox.verify_poc(poc)
+        result = await asyncio.to_thread(poc_sandbox.verify_poc, poc)
         return json.dumps({
             "verified": result["verified"],
             "mode": result["mode"],
@@ -383,7 +390,7 @@ class CodeAuditTools:
         # Auto-verify PoC if provided (static check always; sandbox if enabled)
         poc_status = {"verified": False, "mode": "none"}
         if poc and poc.strip():
-            poc_status = poc_sandbox.verify_poc(poc)
+            poc_status = await asyncio.to_thread(poc_sandbox.verify_poc, poc)
 
         return json.dumps({
             "status": "accepted",

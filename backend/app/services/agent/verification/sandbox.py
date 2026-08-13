@@ -42,10 +42,14 @@ def _validate_poc_syntax(poc: str) -> tuple:
                 return False, f"disallowed import: {node.module}"
         elif isinstance(node, ast.Call):
             fn = node.func
-            if isinstance(fn, ast.Attribute) and fn.attr in {"system", "popen", "run", "call", "check_output", "Popen", "exec", "eval"}:
+            if isinstance(fn, ast.Attribute) and fn.attr in {"system", "popen", "run", "call", "check_output", "Popen", "exec", "eval", "__import__", "mro", "__subclasses__", "__globals__"}:
                 return False, f"disallowed call: {fn.attr}"
-            if isinstance(fn, ast.Name) and fn.id in {"exec", "eval", "open", "compile"}:
+            if isinstance(fn, ast.Name) and fn.id in {"exec", "eval", "open", "compile", "__import__", "getattr", "globals", "vars", "locals", "breakpoint", "exit", "quit", "input"}:
                 return False, f"disallowed call: {fn.id}"
+        elif isinstance(node, ast.Attribute):
+            # Block dunder attribute *access* chains used for sandbox escapes
+            if node.attr in {"__subclasses__", "__globals__", "__builtins__", "__import__", "__base__", "__bases__", "mro"}:
+                return False, f"disallowed attribute access: {node.attr}"
     return True, ""
 
 
@@ -60,7 +64,8 @@ def verify_poc(poc: str, timeout: int = None) -> dict:
         return {"verified": False, "mode": "static", "error": err, "output": ""}
 
     if not settings.SANDBOX_ENABLED:
-        return {"verified": True, "mode": "static", "error": "", "output": "(sandbox disabled - syntax validated only)"}
+        # Static check only — the PoC was NOT executed, so don't claim verified
+        return {"verified": None, "mode": "static", "error": "", "output": "(sandbox disabled - syntax validated only)"}
 
     # Dynamic execution in isolated temp dir, no network, no shell
     with tempfile.TemporaryDirectory(prefix="codeaudit_poc_") as tmp:

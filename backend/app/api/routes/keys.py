@@ -55,7 +55,7 @@ async def list_keys(db: AsyncSession = Depends(get_db)):
     keys = result.scalars().all()
     resp = [_to_response(k) for k in keys]
     for r in resp:
-        r.api_key = _mask_key(r.api_key)
+        r.api_key = _mask_key(decrypt_secret(r.api_key))
     return resp
 
 
@@ -67,7 +67,7 @@ async def get_key(key_id: str, db: AsyncSession = Depends(get_db)):
     if not k:
         raise HTTPException(404, f"API key {key_id} not found")
     resp = _to_response(k)
-    resp.api_key = _mask_key(resp.api_key)
+    resp.api_key = _mask_key(decrypt_secret(resp.api_key))
     return resp
 
 
@@ -97,7 +97,9 @@ async def create_key(payload: APIKeyCreate, db: AsyncSession = Depends(get_db)):
         existing.updated_at = datetime.now(timezone.utc)
         await db.commit()
         await db.refresh(existing)
-        return _to_response(existing)
+        resp = _to_response(existing)
+        resp.api_key = _mask_key(decrypt_secret(existing.api_key))
+        return resp
 
     new_key = APIKey(
         id=str(uuid.uuid4())[:8],
@@ -110,7 +112,9 @@ async def create_key(payload: APIKeyCreate, db: AsyncSession = Depends(get_db)):
     db.add(new_key)
     await db.commit()
     await db.refresh(new_key)
-    return _to_response(new_key)
+    resp = _to_response(new_key)
+    resp.api_key = _mask_key(payload.api_key.strip())
+    return resp
 
 
 @router.patch("/{key_id}", response_model=APIKeyResponse)
@@ -132,7 +136,9 @@ async def update_key(key_id: str, payload: APIKeyUpdate, db: AsyncSession = Depe
     k.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(k)
-    return _to_response(k)
+    resp = _to_response(k)
+    resp.api_key = _mask_key(decrypt_secret(k.api_key))
+    return resp
 
 
 @router.delete("/{key_id}")

@@ -55,3 +55,6 @@ desktop.ini
 
 # ========== Agent Checkpoints ==========
 agent_checkpoints/
+
+# ========== WorkBuddy local data ==========
+.workbuddy/

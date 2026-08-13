@@ -8,57 +8,62 @@
 
 | 依赖 | 版本要求 | 说明 |
 |------|---------|------|
-| Python | 3.10+ | 后端运行时 |
-| Node.js | 18+ | 前端构建（vite） |
-| PowerShell | 5.1+（Windows） | 启动脚本 |
+| Docker | 24+（含 Compose v2） | **推荐部署方式**，Windows / macOS / Linux 行为一致 |
+| Python | 3.11+ | 仅「本地开发模式」需要 |
+| Node.js | 20+ | 仅「本地开发模式」需要（vite 构建前端） |
 | （可选）Semgrep | 最新版 | SAST 引擎，`pip install semgrep` |
 | （可选）pip-audit | 最新版 | Python 依赖扫描，`pip install pip-audit` |
 
-> Windows 下已验证：Python 3.11 + Node 22 + PowerShell 5.1。
+> **跨平台说明（macOS / Linux / Windows 通用）**：后端运行在容器（或本机）内，审计目标代码通过「上传压缩包」或「在线 Git 仓库」进入后端目录。因此不再依赖宿主机本地路径，**Mac 用户也能正常使用**。早期版本只支持「本地路径」，容器访问不到 Mac 的 `/Users/...` 路径而失败，该问题已修复。
 
 ## 2. 安装与启动
 
-### 2.1 一键启动
+### 2.1 Docker 一键部署（推荐，全平台通用）
 
-```powershell
-cd E:\AI\my-project\code-audit
-.\start.ps1
+```bash
+cd code-audit-docker
+cp .env.example .env          # 可选：填入 LLM API Key，留空也可稍后在网页添加
+docker compose up -d --build  # 多阶段构建：Node 构建前端 → Python 运行后端
 ```
-
-启动脚本自动完成：
-1. 检查/创建 Python venv（`backend/.venv`）并安装依赖
-2. 检查前端 `dist` 是否最新，如源码变更则自动 `npm install && npm run build`
-3. 检查 `backend/.env`，不存在则从 `.env.example` 复制
-4. 启动 uvicorn 服务（默认端口 **8080**）
 
 启动成功后：
 - 前端界面：http://localhost:8080
 - API 文档（Swagger）：http://localhost:8080/docs
 
-### 2.2 指定端口
+数据持久化：数据库与上传代码落在命名卷 `codeaudit-data`（`/data`），技能包落在 `codeaudit-skills`，容器重建不丢。
 
-```powershell
-.\start.ps1 -Port 9000
+常用命令：
+
+```bash
+docker compose logs -f          # 查看日志
+docker compose restart          # 重启
+docker compose down             # 停止（保留数据卷）
+docker compose down -v          # 停止并删除数据卷（慎用）
 ```
 
-### 2.3 跳过前端构建
+### 2.2 本地开发模式（不依赖 Docker）
 
-```powershell
-.\start.ps1 -NoBuild
+**后端**：
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate        # Windows: .\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 ```
 
-### 2.4 端口被占用处理
+**前端**（开发热更新或生产构建）：
 
-```powershell
-# 查看占用进程
-Get-NetTCPConnection -LocalPort 8080 -State Listen | Select OwningProcess
-# 停止旧进程（确认是旧实例后）
-Stop-Process -Id <PID> -Force
-# 重新启动
-.\start.ps1
+```bash
+cd frontend
+npm install
+npm run dev        # 开发服务器 http://localhost:5173（代理 /api → 8080）
+# 或生产构建（产物 frontend/dist 由后端静态托管）
+npm run build
 ```
 
-> 注意：`start.ps1` 不会自动杀旧实例，重复启动前请先停掉旧的。
+> 本地开发模式的 `.env` 使用 `backend/.venv` 同级目录的 `backend/.env`（从 `backend/.env.example` 复制）；Docker 模式使用项目根目录 `.env`。两者字段一致。
 
 ## 3. 配置
 
@@ -123,11 +128,19 @@ pip install semgrep pip-audit
 
 ### 4.1 新建项目
 
-1. 点击「新建项目」
-2. 填写：
-   - **项目名称**：任意
-   - **代码路径**：本地代码目录绝对路径（如 `E:\my-project\myapp`）
-3. 保存。系统自动探测技术栈（识别 package.json / requirements.txt / pom.xml 等）
+点击「新建项目」，提供**三种代码来源**（任选其一）：
+
+1. **上传压缩包（推荐，Mac / Docker / Windows 通用）**
+   - 选择本地 `.zip` 文件上传，后端自动解压（含 zip-slip 防护、单层目录自动扁平化、200MB 上限）
+   - 可勾选「创建后立即启动审计」，选好模式 + LLM 后直接开始
+2. **在线仓库**
+   - 填入 Git 仓库 URL（支持 `https://` 与 `git@` 形式），后端执行 `git clone --depth 1` 浅克隆
+   - 同样支持创建后直接启动审计
+3. **本地路径**
+   - 仅当后端运行在本机（本地开发模式）时可用，直接输入本地代码目录绝对路径
+   - Docker 部署时容器内不存在宿主机路径，请用前两种方式
+
+保存后系统自动探测技术栈（识别 `package.json` / `requirements.txt` / `pom.xml` / `go.mod` 等）。
 
 ### 4.2 启动审计
 
@@ -204,10 +217,18 @@ API Key 无效或额度不足。在设置页重新配置，或用「测试」按
 审计详情页「日志」Tab，或 `GET /api/audits/{audit_id}/logs`。
 
 ### Q5: 数据库在哪里？如何备份？
-`backend/code_audit.db`（SQLite）。直接复制文件即可备份；建议升级前备份。
+- **Docker 部署**：数据库在命名卷 `codeaudit-data` 内的 `/data/code_audit.db`。备份方式：`docker compose down` 后复制卷数据，或直接 `docker run --rm -v codeaudit-data:/data -v $(pwd):/backup busybox cp /data/code_audit.db /backup/code_audit.db`。
+- **本地开发模式**：`backend/code_audit.db`（SQLite）。直接复制文件即可备份。
+- 建议升级/迁移前先备份。
 
 ### Q6: 如何重置数据？
-停止服务后删除 `backend/code_audit.db`，重启服务自动重建空库（**会清空所有数据**）。
+- **Docker 部署**：`docker compose down -v` 删除数据卷（**会清空所有项目、审计、密钥**），再 `docker compose up -d` 重建空库。
+- **本地开发模式**：停止服务后删除 `backend/code_audit.db`，重启服务自动重建空库。
+
+> 清除所有 API Key：在网页「设置 / API Keys」页逐条删除，或执行 `DELETE FROM api_keys;`（数据库）。
+
+### Q7: macOS 无法新建项目 / 报路径错误？
+早期版本仅支持「本地路径」，而 Docker 容器内访问不到 Mac 的 `/Users/...` 路径。请改用「上传压缩包」或「在线仓库」两种来源（已内置修复）。
 
 ## 7. 安全注意事项
 

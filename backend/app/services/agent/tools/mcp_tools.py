@@ -22,11 +22,17 @@ logger = logging.getLogger(__name__)
 
 import os as _os
 
-# Runtime MCP server config file (merged with settings.MCP_SERVERS)
-_MCP_CONFIG_FILE = _os.path.join(
-    _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))))),
-    "mcp_servers.json",
-)
+# Runtime MCP server config file (merged with settings.MCP_SERVERS).
+# Prefer the Docker data volume so runtime-added servers survive rebuilds.
+def _default_config_file() -> str:
+    if _os.path.isdir("/data") and _os.access("/data", _os.W_OK):
+        return "/data/mcp_servers.json"
+    return _os.path.join(
+        _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))))),
+        "mcp_servers.json",
+    )
+
+_MCP_CONFIG_FILE = _os.environ.get("MCP_CONFIG_FILE") or _default_config_file()
 
 
 @dataclass

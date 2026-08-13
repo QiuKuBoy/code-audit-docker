@@ -20,9 +20,11 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# 系统依赖（轻量，保留 git 以便项目导入场景可选）
+# 系统依赖（git 用于「在线仓库」克隆导入，curl 用于健康检查）
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
+        git \
+        ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # 后端依赖

@@ -141,7 +141,10 @@ copy .env.example .env
 
 ### 使用流程
 
-1. **新建项目** — 输入名称 + 本地代码路径 + 语言类型（自动检测或手动选择）
+1. **新建项目** — 三种代码来源任选：
+   - **上传压缩包**（推荐，Mac / Docker 通用）：选择 .zip 上传，可勾选「创建后立即启动审计」直接开始
+   - **在线仓库**：填入 Git 仓库 URL，浅克隆后直接审计
+   - **本地路径**：后端运行在本机时，直接输入本地代码路径
 2. **启动审计** — 选择模式（Quick/Smart/Comprehensive）、LLM 厂商、模型、最大轮次
 3. **实时观察** — 阶段进度条、Agent 编排图、findings 实时入库
 4. **导出报告** — Markdown / SARIF / 中英文报告
@@ -149,30 +152,62 @@ copy .env.example .env
 ## 📁 项目结构
 
 ```
-code-audit/
-├── backend/               # FastAPI + SQLAlchemy + SQLite
+code-audit-docker/
+├── backend/
 │   ├── app/
-│   │   ├── api/routes/    # projects / audits / skills / mcp / dashboard / keys
-│   │   ├── core/          # config, crypto, database
-│   │   ├── models/        # ORM 模型 + Pydantic schemas
+│   │   ├── main.py                  # FastAPI 入口：CORS / 静态托管 dist / 健康检查
+│   │   ├── core/
+│   │   │   ├── config.py            # Pydantic Settings（11 厂商 / Agent 参数 / 引擎 / 上传·克隆）
+│   │   │   ├── crypto.py            # Fernet 加解密（API Key 静态加密，主密钥落 /data/.enc_key）
+│   │   │   ├── database.py          # async engine（WAL + busy_timeout）+ session + init_db
+│   │   │   └── registry.py          # 工具注册表（ToolRegistry）
+│   │   ├── models/
+│   │   │   ├── models.py            # ORM：Project / Audit / Finding / AuditLog / APIKey
+│   │   │   └── schemas.py           # Pydantic 请求/响应 schema
+│   │   ├── api/routes/
+│   │   │   ├── projects.py          # 项目 CRUD + /upload（zip 解压）+ /clone（git 浅克隆）
+│   │   │   ├── audits.py            # 审计 CRUD / 中止 / 恢复 / 报告 / SARIF / 对比
+│   │   │   ├── keys.py              # API Key 管理（加密存储 + 掩码返回）
+│   │   │   ├── skills.py            # 技能包 CRUD（含路径穿越防护）
+│   │   │   ├── mcp.py               # MCP 服务器配置（运行时落 /data）
+│   │   │   ├── llm.py               # 厂商列表 / 模型
+│   │   │   └── dashboard.py         # 统计看板
 │   │   └── services/
-│   │       ├── agent/
-│   │       │   ├── core/          # ReAct loop, state, memory, specialists
-│   │       │   ├── tools/         # read/grep/scan/finalize + MCP bridge
-│   │       │   ├── skills/        # 技能包管理
-│   │       │   ├── prompts/       # 阶段感知 system prompt
-│   │       │   ├── orchestrator.py    # 并行分块编排
-│   │       │   ├── specialist_orchestrator.py  # 专精 Agent 分派
-│   │       │   └── service.py     # 审计工作流编排
-│   │       ├── llm/              # 11 家厂商适配器（工厂模式）
-│   │       └── ...
+│   │       ├── ingest.py            # 代码导入：zip 解压（含 zip-slip 防护）/ git clone
+│   │       ├── llm/
+│   │       │   ├── base_adapter.py  # LLMAdapter 抽象（chat / summarize）
+│   │       │   ├── factory.py       # 厂商工厂
+│   │       │   ├── testing.py       # StubLLM（测试用）
+│   │       │   └── adapters/        # 11 家厂商适配器（OpenAI 兼容类复用 openai_adapter）
+│   │       └── agent/
+│   │           ├── service.py       # 审计工作流编排（_run_audit_task）
+│   │           ├── orchestrator.py  # 并行分块编排（目录分块 + 去重合并）
+│   │           ├── specialist_orchestrator.py  # 专精 Agent 分派
+│   │           ├── core/            # loop / state / memory / registry / specialists
+│   │           ├── tools/           # agent_tools（read/grep/scan/finalize）+ mcp_tools（MCP bridge）
+│   │           ├── skills/          # 技能包匹配 manager
+│   │           ├── scanners/        # engine（Semgrep / SCA / 自定义规则，优雅降级）
+│   │           ├── rules/           # YAML 规则加载
+│   │           ├── verification/    # PoC 沙箱（静态 AST 校验 + 可选执行）
+│   │           ├── export/          # SARIF 2.1.0 导出
+│   │           └── prompts/         # 阶段感知 system prompt
 │   └── requirements.txt
-├── frontend/              # React 18 + TypeScript + TailwindCSS + Vite
-│   └── src/pages/         # Dashboard / Projects / AuditDetail / Skills / MCP
-└── rules/                 # Rule-as-Code YAML 规则
-├── skills/                # 14 个漏洞类型技能包
-└── docs/                  # 完整文档（USER_GUIDE / ARCHITECTURE / DEVELOPER）
+├── frontend/                      # React 18 + TypeScript + TailwindCSS + Vite
+│   └── src/
+│       ├── pages/                 # Dashboard / Projects / ProjectDetail / AuditDetail / Skills / MCP / Settings
+│       ├── services/api.ts        # 全部 API 调用封装
+│       ├── types/index.ts         # TS 接口（与 Pydantic schema 对齐）
+│       └── i18n/index.tsx         # 中英文案
+├── rules/                         # Rule-as-Code YAML 规则（custom_rules.yml）
+├── skills/                        # 14 个漏洞类型技能包（每个含 SKILL.md）
+├── docs/                          # 完整文档：USER_GUIDE / ARCHITECTURE / DEVELOPER
+├── Dockerfile / docker-compose.yml
+├── .env.example / backend/.env.example
+├── LICENSE / README.md / README.en.md
 ```
+
+> 构建产物 `frontend/dist/` 由后端静态托管；数据库、上传代码、技能包、运行时配置均落在 Docker 卷 `/data`（命名卷 `codeaudit-data`）与 `codeaudit-skills`，容器重建不丢。
+
 
 ## 📚 文档
 

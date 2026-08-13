@@ -1,6 +1,7 @@
 """Projects API routes"""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import os
@@ -9,6 +10,7 @@ from app.core.database import get_db
 from app.models.models import Project, Audit
 from app.models.schemas import ProjectCreate, ProjectResponse, AuditResponse
 from app.services.agent.service import create_project
+from app.services.ingest import ingest_zip, ingest_git
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -18,6 +20,47 @@ async def create_project_route(data: ProjectCreate):
     try:
         result = await create_project(data.name, data.path, data.description, getattr(data, 'language', ''))
         return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/upload", response_model=ProjectResponse)
+async def upload_project_route(
+    file: UploadFile = File(...),
+    name: str = Form(""),
+    description: str = Form(""),
+    language: str = Form(""),
+):
+    """Create a project from an uploaded zip archive.
+
+    The archive is extracted into UPLOADS_DIR (persistent volume in Docker),
+    so no local path on the user's machine is required — works on macOS too.
+    """
+    if not (file.filename or "").lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="Only .zip archives are supported")
+    try:
+        data = await file.read()
+        project_path, suggested_name = ingest_zip(data, file.filename or "")
+        final_name = name.strip() or suggested_name
+        return await create_project(final_name, project_path, description, language)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class CloneRequest(BaseModel):
+    url: str
+    name: str = ""
+    description: str = ""
+    language: str = ""
+
+
+@router.post("/clone", response_model=ProjectResponse)
+async def clone_project_route(data: CloneRequest):
+    """Create a project by cloning a remote git repository (shallow, depth 1)."""
+    try:
+        project_path, suggested_name = ingest_git(data.url)
+        final_name = data.name.strip() or suggested_name
+        return await create_project(final_name, project_path, data.description, data.language)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

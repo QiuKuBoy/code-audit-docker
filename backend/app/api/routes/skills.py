@@ -86,7 +86,7 @@ async def list_skills():
 
 @router.get("/{skill_name}")
 async def get_skill(skill_name: str):
-    md_path = os.path.join(_skills_dir(), skill_name, "SKILL.md")
+    md_path = os.path.join(_safe_skill_dir(skill_name), "SKILL.md")
     if not os.path.isfile(md_path):
         raise HTTPException(status_code=404, detail=f"Skill not found: {skill_name}")
     with open(md_path, "r", encoding="utf-8") as f:
@@ -119,12 +119,23 @@ async def create_skill(name: str, content: str, display_name: str = ""):
     return {"status": "created", "name": dir_name}
 
 
+def _safe_skill_dir(skill_name: str) -> str:
+    """Resolve a skill dir and guarantee it stays inside _skills_dir()."""
+    if not re.match(r"^[a-zA-Z0-9_\-]{1,64}$", skill_name or ""):
+        raise HTTPException(status_code=400, detail=f"Invalid skill name: {skill_name!r}")
+    base = os.path.realpath(_skills_dir())
+    dest = os.path.realpath(os.path.join(base, skill_name))
+    if not (dest.startswith(base + os.sep)):
+        raise HTTPException(status_code=400, detail="Invalid skill path")
+    return dest
+
+
 @router.delete("/{skill_name}")
 async def delete_skill(skill_name: str):
     """Delete a custom skill pack. Built-in skills are protected."""
     if skill_name in SKILL_EFFICIENCY:
         raise HTTPException(status_code=400, detail=f"Cannot delete built-in skill: {skill_name}")
-    skill_dir = os.path.join(_skills_dir(), skill_name)
+    skill_dir = _safe_skill_dir(skill_name)
     if not os.path.isdir(skill_dir):
         raise HTTPException(status_code=404, detail=f"Skill not found: {skill_name}")
     shutil.rmtree(skill_dir)
@@ -198,7 +209,10 @@ async def upload_skill(file: UploadFile = File(...), display_name: str = Form(""
     with open(os.path.join(skill_dir, "SKILL.md"), "w", encoding="utf-8") as f:
         f.write(content)
     for rel, data in extracted_files:
-        dest = os.path.join(skill_dir, rel)
+        # Defense in depth: never write outside skill_dir even if rel contains ..
+        dest = os.path.realpath(os.path.join(skill_dir, rel))
+        if not dest.startswith(os.path.realpath(skill_dir) + os.sep):
+            continue
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         with open(dest, "wb") as f:
             f.write(data)

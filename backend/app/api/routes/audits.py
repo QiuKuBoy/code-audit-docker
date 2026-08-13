@@ -193,23 +193,35 @@ async def resume_audit(audit_id: str, db: AsyncSession = Depends(get_db)):
 
     # Resume in background
     import asyncio
-    from app.services.agent.service import _run_audit_task
+    from app.services.agent.service import _run_audit_task, _resolve_api_key, _BACKGROUND_TASKS
+    from app.core.crypto import decrypt_secret
+
+    # Resolve the API key the same way start_audit does (explicit > DB).
+    # audit.llm_api_key is encrypted at rest — decrypt before use.
+    stored_key = decrypt_secret(audit.llm_api_key) if audit.llm_api_key else ""
+    try:
+        resolved_key = await _resolve_api_key(audit.llm_provider, stored_key)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     audit.status = "running"
     audit.error_message = ""
     await db.commit()
 
-    asyncio.create_task(_run_audit_task(
+    task = asyncio.create_task(_run_audit_task(
         audit_id=audit_id,
         project_path=project.path,
         project_name=project.name,
         tech_stack=project.tech_stack,
         llm_provider=audit.llm_provider,
         llm_model=audit.llm_model,
-        llm_api_key=audit.llm_api_key or "",
+        llm_api_key=resolved_key,
         llm_base_url="",
         max_turns=audit.max_turns,
         mode=audit.mode or "smart",
     ))
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
     return {"status": "resumed"}
 
 

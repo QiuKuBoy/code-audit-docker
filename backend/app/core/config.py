@@ -15,6 +15,13 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./code_audit.db"
 
+    # Project ingestion (zip upload / git clone)
+    # Directory where uploaded archives and cloned repos are stored.
+    # In Docker set UPLOADS_DIR=/data/uploads so it persists on the data volume.
+    UPLOADS_DIR: str = "./uploads"
+    MAX_UPLOAD_MB: int = 200          # max zip archive size
+    GIT_CLONE_TIMEOUT: int = 300      # seconds
+
     # ── LLM Providers (2026-08 latest models) ────────────────────────────
     # Each provider has: API_KEY, BASE_URL (optional), MODEL
     # API keys are optional — can be entered per-audit in the web UI

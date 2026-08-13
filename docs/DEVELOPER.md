@@ -6,46 +6,48 @@
 
 ## 1. 开发环境
 
-```powershell
-cd E:\AI\my-project\code-audit
+```bash
+# 推荐用 Docker 启动（全平台一致）：
+cd code-audit-docker
+docker compose up -d --build
 
-# 后端依赖
+# 或本地开发模式（不依赖 Docker）：
+# 后端
 cd backend
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+source .venv/bin/activate        # Windows: .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8080
 
-# 前端
-cd ..\frontend
+# 前端（另一终端）
+cd frontend
 npm install
-
-# 启动（开发模式：后端 8080 + 前端热更新 5173）
-cd ..\backend
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8080
-cd ..\frontend
-npm run dev   # http://localhost:5173（前端 dev server 代理 /api 到 8080）
+npm run dev   # http://localhost:5173（dev server 代理 /api 到 8080）
 ```
+
+> 项目根目录名为 `code-audit-docker`（非 `code-audit`）。Docker 模式环境变量读根目录 `.env`；本地模式读 `backend/.env`。
 
 ## 2. 代码结构速查
 
 ```
 backend/app/
-├── main.py                    # 入口（含 CORS、静态托管）
+├── main.py                    # 入口（含 CORS、静态托管 dist、健康检查）
 ├── core/
-│   ├── config.py              # Settings（12 厂商、Agent 参数、引擎开关）
-│   ├── crypto.py              # Fernet 加解密（API Key 静态加密）
-│   ├── database.py            # async engine + session + init_db
+│   ├── config.py              # Settings（11 厂商、Agent 参数、引擎、上传·克隆）
+│   ├── crypto.py              # Fernet 加解密（API Key 静态加密，主密钥落 /data/.enc_key）
+│   ├── database.py            # async engine（WAL）+ session + init_db
 │   └── registry.py            # 工具注册表
 ├── models/
 │   ├── models.py              # ORM：Project/Audit/Finding/AuditLog/APIKey
 │   └── schemas.py             # Pydantic：响应/请求 schema
 ├── api/routes/
-│   ├── projects.py / audits.py / keys.py / dashboard.py
+│   ├── projects.py / audits.py / keys.py / dashboard.py / mcp.py / llm.py
 ├── services/
-│   ├── llm/                   # base_adapter + adapters/ + factory
+│   ├── ingest.py              # 代码导入：zip 解压 + git clone
+│   ├── llm/                   # base_adapter + adapters/ + factory + testing(StubLLM)
 │   └── agent/
-│       ├── core/              # loop.py / state.py / memory.py
-│       ├── tools/agent_tools.py
+│       ├── core/              # loop.py / state.py / memory.py / registry.py / specialists.py
+│       ├── tools/             # agent_tools.py + mcp_tools.py（MCP bridge）
 │       ├── skills/manager.py
 │       ├── scanners/engine.py
 │       ├── rules/loader.py
@@ -53,12 +55,13 @@ backend/app/
 │       ├── export/sarif.py
 │       ├── prompts/system_prompt.py
 │       ├── orchestrator.py
+│       ├── specialist_orchestrator.py
 │       └── service.py
 frontend/src/
-├── pages/                     # DashboardPage / ProjectDetailPage / AuditDetailPage
+├── pages/                     # Dashboard / Projects / ProjectDetail / AuditDetail / Skills / MCP / Settings
 ├── services/api.ts            # 全部 API 调用
 ├── types/index.ts             # TS 接口（与 Pydantic schema 对齐）
-└── i18n/                      # zh.ts / en.ts
+└── i18n/index.tsx             # zh / en 文案
 ```
 
 ## 3. 如何扩展
@@ -194,7 +197,7 @@ async def run_my_scanner(self, project_path) -> list[ScanCandidate]:
 
 ### 4.2 前端
 
-```powershell
+```bash
 cd frontend
 npx tsc --noEmit        # TS 类型检查
 npm run build           # 生产构建
@@ -223,15 +226,17 @@ bd2d3c9 add: multi-agent orchestrator (AutoCVE-style parallel chunked audit with
 - 改完一批功能即 commit（方便回滚），勿攒大量改动一次提交
 - 提交信息格式：`<type>: <summary>`（type: upgrade/add/fix/security/chore/docs）
 - 重要改动先备份或确认 git 状态干净
-
-> 注意：PowerShell 下 git commit 偶现 exit code 1 是 NativeCommandError 假象，
-> 用 `git log --oneline` 确认提交实际成功。
+- 提交前确认 `.env`、`*.db`、`.enc_key` 等敏感文件已被 `.gitignore` 忽略，不进入版本库
 
 ## 6. 备份与回滚
 
-```powershell
+```bash
 # 全量备份（改造前快照）
-Copy-Item -Recurse code-audit code-audit_backup_<date>
+cp -r code-audit-docker code-audit-docker_backup_<date>
+
+# Docker 数据卷备份
+docker run --rm -v codeaudit-data:/data -v "$(pwd)":/backup busybox \
+  tar czf /backup/codeaudit-data-<date>.tar.gz -C /data .
 
 # 回滚到某提交
 git log --oneline
@@ -243,12 +248,13 @@ git reset --hard <commit>         # 全量回滚（谨慎）
 
 | 坑 | 说明 |
 |----|------|
-| 后台 Start-Job 起 uvicorn 404 | 环境变量不生效，直接前台跑验证更可靠 |
-| PowerShell 5.1 无 -SkipHttpErrorCheck | 用 `curl.exe -w "%{http_code}"` 验证状态码 |
-| .ps1 中文乱码 | 脚本需存为 UTF-8 with BOM（无 BOM 时 PS 5.1 按 GBK 解析） |
+| Docker 中环境变量不生效 | 确认 `docker-compose.yml` 已 `environment:` 注入，且根目录 `.env` 已 `cp .env.example .env` |
+| curl 验证状态码 | 用 `curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/health` |
+| 中文环境脚本乱码 | 脚本文件保存为 UTF-8（无 BOM）；跨平台优先用 `bash` 而非 PowerShell |
 | aiosqlite + SQLite 加列 | create_all 不改旧表，需手动 ALTER TABLE |
 | tool_calls 与 role=tool 不配对 | 会 400；memory 层 `_sanitize_tool_pairs` 兜底，但测试中注意 |
-| 引擎扫描阻塞事件循环 | 必须 `asyncio.to_thread` 包装 |
+| 引擎扫描阻塞事件循环 | 必须 `asyncio.to_thread` 包装（grep / Semgrep / PoC 均如此） |
+| Mac / 容器访问不到代码 | 用「上传压缩包」或「Git 仓库」，不要依赖「本地路径」（容器内无宿主机路径） |
 
 ## 8. 安全审计（对平台自身）
 

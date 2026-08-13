@@ -35,6 +35,13 @@ from .rules import loader as rules_loader
 from .verification import sandbox as poc_sandbox
 from .tools.mcp_tools import get_mcp_bridge, init_mcp_bridge, load_merged_mcp_configs
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Strong references to background audit tasks (prevents premature GC)
+_BACKGROUND_TASKS: set = set()
+
 
 def detect_tech_stack(project_path: str) -> list:
     """Auto-detect project tech stack from files"""
@@ -310,7 +317,8 @@ async def start_audit(
         if not project:
             raise ValueError(f"Project not found: {project_id}")
 
-        # Create audit record
+        # Create audit record (encrypt any runtime-provided key at rest)
+        from app.core.crypto import encrypt_secret
         audit = Audit(
             id=audit_id,
             project_id=project_id,
@@ -318,7 +326,7 @@ async def start_audit(
             status="running",
             llm_provider=provider,
             llm_model=llm_model or provider,
-            llm_api_key=llm_api_key or "",
+            llm_api_key=encrypt_secret(llm_api_key) if llm_api_key else "",
             llm_base_url=llm_base_url or "",
             max_turns=turns,
         )
@@ -329,11 +337,23 @@ async def start_audit(
         project_name = project.name
         tech_stack = project.tech_stack
 
-    # Resolve API key (DB > .env)
-    resolved_key = await _resolve_api_key(provider, llm_api_key)
+    # Resolve API key (DB > .env) BEFORE launching — fail fast with a clean
+    # status instead of leaving a zombie "running" record
+    try:
+        resolved_key = await _resolve_api_key(provider, llm_api_key)
+    except ValueError:
+        async with async_session() as db:
+            result = await db.execute(select(Audit).where(Audit.id == audit_id))
+            audit = result.scalar_one_or_none()
+            if audit:
+                audit.status = "failed"
+                audit.error_message = f"No API key configured for provider '{provider}'"
+                audit.completed_at = datetime.now(timezone.utc)
+                await db.commit()
+        raise
 
-    # Start audit in background
-    asyncio.create_task(_run_audit_task(
+    # Start audit in background (keep a strong ref so GC can't kill it)
+    task = asyncio.create_task(_run_audit_task(
         audit_id=audit_id,
         project_path=project_path,
         project_name=project_name,
@@ -345,6 +365,8 @@ async def start_audit(
         max_turns=turns,
         mode=mode,
     ))
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
 
     return audit_id
 
@@ -659,7 +681,7 @@ async def _run_audit_task(
                 state.terminal_reason = "Multi-agent orchestration completed"
                 state.mark_stage("finalize")
                 loop = ReActLoop(state, llm, registry, memory, skill_mgr)
-                await loop._save_finding_safe(orch_result["merged"])
+                await loop._save_finding_safe(verified)
                 await loop._update_audit_status()
             else:
                 loop = ReActLoop(state, llm, registry, memory, skill_mgr, max_turns=dyn_turns)
@@ -675,6 +697,7 @@ async def _run_audit_task(
                 await loop._save_finding_safe(verified)
 
     except Exception as e:
+        logger.exception("Audit %s failed", audit_id)
         # Update audit status to failed
         async with async_session() as db:
             result = await db.execute(select(Audit).where(Audit.id == audit_id))
@@ -682,6 +705,5 @@ async def _run_audit_task(
             if audit:
                 audit.status = "failed"
                 audit.error_message = str(e)
-                from datetime import timezone
                 audit.completed_at = datetime.now(timezone.utc)
                 await db.commit()

@@ -29,6 +29,8 @@ services:
       DEFAULT_LLM_PROVIDER: "${DEFAULT_LLM_PROVIDER:-deepseek}"
       # 数据加密主密钥（建议设置固定值，否则每次重建容器密钥失效）
       API_KEY_ENCRYPTION_KEY: "${API_KEY_ENCRYPTION_KEY:-}"
+      # 上传压缩包 / git clone 的代码存放目录（落在 /data 卷上，随容器持久化）
+      UPLOADS_DIR: "/data/uploads"
     volumes:
       # 数据库 / MCP 配置持久化
       - codeaudit-data:/data

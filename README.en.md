@@ -101,14 +101,6 @@ docker compose down -v          # stop & delete volumes (careful)
 - Node.js 20+
 - (Optional) Semgrep: `pip install semgrep`
 
-### One-Click Start
-
-```powershell
-.\start.bat
-```
-
-Open <http://localhost:8080> in your browser.
-
 ### Configure LLM API Key (either way)
 
 **Option 1 (recommended)**: add keys via the web UI Settings page (encrypted at rest).
@@ -125,7 +117,7 @@ copy .env.example .env
 
 ### Usage Flow
 
-1. **Create Project** — name + local code path + language (auto-detect or manual)
+1. **Create Project** — pick a code source: **upload a zip** (recommended, works on Mac & Docker), **clone a Git repo** (shallow clone), or **local path** (backend runs on the same machine). Optionally start the audit right after creation.
 2. **Start Audit** — choose mode (Quick/Smart/Comprehensive), LLM provider, model, max turns
 3. **Watch Live** — stage progress bar, orchestration diagram, real-time findings
 4. **Export Report** — Markdown / SARIF / bilingual report
@@ -133,31 +125,61 @@ copy .env.example .env
 ## 📁 Project Structure
 
 ```
-code-audit/
-├── backend/               # FastAPI + SQLAlchemy + SQLite
+code-audit-docker/
+├── backend/
 │   ├── app/
-│   │   ├── api/routes/    # projects / audits / skills / mcp / dashboard / keys
-│   │   ├── core/          # config, crypto, database
-│   │   ├── models/        # ORM models + Pydantic schemas
+│   │   ├── main.py                  # FastAPI entry: CORS / serve dist / health check
+│   │   ├── core/
+│   │   │   ├── config.py            # Pydantic Settings (providers / agent params / engines / upload·clone)
+│   │   │   ├── crypto.py            # Fernet encrypt-at-rest (master key in /data/.enc_key)
+│   │   │   ├── database.py          # async engine (WAL + busy_timeout) + session + init_db
+│   │   │   └── registry.py          # Tool registry (ToolRegistry)
+│   │   ├── models/
+│   │   │   ├── models.py            # ORM: Project / Audit / Finding / AuditLog / APIKey
+│   │   │   └── schemas.py           # Pydantic request/response schemas
+│   │   ├── api/routes/
+│   │   │   ├── projects.py          # project CRUD + /upload (zip) + /clone (git)
+│   │   │   ├── audits.py            # audit CRUD / abort / resume / report / SARIF / compare
+│   │   │   ├── keys.py              # API key management (encrypted + masked)
+│   │   │   ├── skills.py            # skill pack CRUD (path-traversal guarded)
+│   │   │   ├── mcp.py               # MCP server config (runtime in /data)
+│   │   │   ├── llm.py               # provider list / models
+│   │   │   └── dashboard.py         # stats
 │   │   └── services/
-│   │       ├── agent/
-│   │       │   ├── core/          # ReAct loop, state, memory, specialists
-│   │       │   ├── tools/         # read/grep/scan/finalize + MCP bridge
-│   │       │   ├── skills/        # skill pack manager
-│   │       │   ├── prompts/       # stage-aware system prompt
-│   │       │   ├── orchestrator.py             # parallel chunk orchestration
-│   │       │   ├── specialist_orchestrator.py  # specialist dispatch
-│   │       │   └── service.py     # audit workflow
-│   │       ├── llm/              # 11 provider adapters (factory pattern)
-│   │       └── ...
+│   │       ├── ingest.py            # code import: zip extract (zip-slip guarded) / git clone
+│   │       ├── llm/
+│   │       │   ├── base_adapter.py  # LLMAdapter abstract (chat / summarize)
+│   │       │   ├── factory.py       # provider factory
+│   │       │   ├── testing.py       # StubLLM (tests)
+│   │       │   └── adapters/        # 11 provider adapters (OpenAI-compatible reuse openai_adapter)
+│   │       └── agent/
+│   │           ├── service.py       # audit workflow (_run_audit_task)
+│   │           ├── orchestrator.py  # parallel chunked orchestration (dedup merge)
+│   │           ├── specialist_orchestrator.py  # specialist dispatch
+│   │           ├── core/            # loop / state / memory / registry / specialists
+│   │           ├── tools/           # agent_tools (read/grep/scan/finalize) + mcp_tools (MCP bridge)
+│   │           ├── skills/          # skill pack matcher
+│   │           ├── scanners/        # engine (Semgrep / SCA / custom rules, graceful degrade)
+│   │           ├── rules/           # YAML rule loader
+│   │           ├── verification/    # PoC sandbox (static AST + optional exec)
+│   │           ├── export/          # SARIF 2.1.0 export
+│   │           └── prompts/         # stage-aware system prompt
 │   └── requirements.txt
-├── frontend/              # React 18 + TypeScript + TailwindCSS + Vite
-│   └── src/pages/         # Dashboard / Projects / AuditDetail / Skills / MCP
-├── rules/                 # Rule-as-Code YAML rules
-├── skills/                # 14 vulnerability skill packs
-├── docs/                  # USER_GUIDE / ARCHITECTURE / DEVELOPER
-└── start.bat              # one-click start script
+├── frontend/                      # React 18 + TypeScript + TailwindCSS + Vite
+│   └── src/
+│       ├── pages/                 # Dashboard / Projects / ProjectDetail / AuditDetail / Skills / MCP / Settings
+│       ├── services/api.ts        # all API calls
+│       ├── types/index.ts         # TS interfaces (align with Pydantic schemas)
+│       └── i18n/index.tsx         # CN/EN copy
+├── rules/                         # Rule-as-Code YAML (custom_rules.yml)
+├── skills/                        # 14 vulnerability skill packs (each SKILL.md)
+├── docs/                          # USER_GUIDE / ARCHITECTURE / DEVELOPER
+├── Dockerfile / docker-compose.yml
+├── .env.example / backend/.env.example
+├── LICENSE / README.md / README.en.md
 ```
+
+> Build output `frontend/dist/` is served by the backend. The database, uploaded code, skill packs and runtime config all live on Docker volumes `/data` (`codeaudit-data`) and `codeaudit-skills`, surviving container rebuilds.
 
 ## 📚 Documentation
 
