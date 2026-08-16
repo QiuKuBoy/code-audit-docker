@@ -149,6 +149,42 @@ copy .env.example .env
 3. **实时观察** — 阶段进度条、Agent 编排图、findings 实时入库
 4. **导出报告** — Markdown / SARIF / 中英文报告
 
+## 🖼️ 界面预览
+
+> 以下截图来自运行在 Docker 中的 CodeAudit（`http://localhost:8080`），使用示例项目 [Demo Vuln App](examples/demo-vuln-app) 截取。
+
+### 新建项目（三种代码来源）
+
+![新建项目](docs/screenshots/zh/new_project.png)
+
+支持「上传压缩包」「在线仓库」「本地路径」三种方式；勾选「创建后立即启动审计」可在项目创建后直接开始审计。
+
+### 项目列表
+
+![项目列表](docs/screenshots/zh/projects.png)
+
+### 启动新审计
+
+![启动审计](docs/screenshots/zh/project_detail.png)
+
+选择审计模式（快速扫描 / 智能审计 / 综合审计）、LLM 提供商、模型与最大轮次。
+
+### 仪表盘
+
+![仪表盘](docs/screenshots/zh/dashboard.png)
+
+### 技能包
+
+![技能包](docs/screenshots/zh/skills.png)
+
+### MCP 服务
+
+![MCP 服务](docs/screenshots/zh/mcp.png)
+
+### API Key 管理
+
+![API Key 管理](docs/screenshots/zh/settings.png)
+
 ## 📁 项目结构
 
 ```

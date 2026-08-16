@@ -122,6 +122,42 @@ copy .env.example .env
 3. **Watch Live** — stage progress bar, orchestration diagram, real-time findings
 4. **Export Report** — Markdown / SARIF / bilingual report
 
+## 🖼️ Screenshots
+
+> The screenshots below are taken from a CodeAudit instance running in Docker (`http://localhost:8080`), using the sample project [Demo Vuln App](examples/demo-vuln-app).
+
+### Create Project — three code sources
+
+![New Project](docs/screenshots/en/new_project.png)
+
+Choose **Upload Zip**, **Git Repo**, or **Local Path**; check "Start audit immediately after creation" to begin auditing right after the project is created.
+
+### Project List
+
+![Project List](docs/screenshots/en/projects.png)
+
+### Start New Audit
+
+![Start Audit](docs/screenshots/en/project_detail.png)
+
+Select audit mode (Quick Scan / Smart Audit / Comprehensive), LLM provider, model, and max turns.
+
+### Dashboard
+
+![Dashboard](docs/screenshots/en/dashboard.png)
+
+### Skill Packs
+
+![Skill Packs](docs/screenshots/en/skills.png)
+
+### MCP Services
+
+![MCP Services](docs/screenshots/en/mcp.png)
+
+### API Key Management
+
+![API Key Management](docs/screenshots/en/settings.png)
+
 ## 📁 Project Structure
 
 ```
